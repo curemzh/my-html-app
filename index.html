@@ -1,0 +1,599 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>田んぼマップ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Reactライブラリを直接グローバル変数として読み込む (最も安定した方法) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel Standalone: ブラウザで直接JSXを解釈するために追加 -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+      body {
+        background-color: #111827; /* bg-gray-900 */
+        font-family: sans-serif;
+      }
+    </style>
+  <link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+
+    <!-- ReactコードをBabelでトランスパイル -->
+    <script type="text/babel">
+      // --- Helper Components (defined outside App for performance and stability) ---
+
+      const GridCell = ({ address, isSelected, onClick }) => {
+        const baseClasses = "flex items-center justify-center w-7 h-7 border cursor-pointer transition-all duration-200 ease-in-out transform hover:scale-105 rounded";
+        const borderClasses = isSelected
+          ? "border-emerald-500 bg-emerald-800/50"
+          : "border-gray-700 bg-gray-800 hover:bg-gray-700";
+        const textClasses = isSelected
+          ? "text-xs font-bold text-emerald-300"
+          : "text-[10px] font-semibold text-gray-500";
+
+        return (
+          <div
+            className={`${baseClasses} ${borderClasses}`}
+            onClick={() => onClick(address)}
+            role="button"
+            aria-pressed={isSelected}
+            aria-label={`Address ${address}`}
+          >
+            <span className={textClasses}>{address}</span>
+          </div>
+        );
+      };
+
+      const SubAddressItem = ({ num, isSelected, onSelect, comment, onCommentChange, showComments }) => {
+        return (
+          <div className="flex items-center gap-1">
+            <div
+              onClick={() => onSelect(num)}
+              className={`
+                w-6 h-6 flex-shrink-0 flex items-center justify-center text-[9px] font-mono rounded cursor-pointer transition-all duration-200
+                ${isSelected 
+                  ? 'bg-emerald-500 text-white font-bold ring-1 ring-emerald-400' 
+                  : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-white'}
+              `}
+              role="button"
+              aria-pressed={isSelected}
+              aria-label={`Select sub-address ${num}`}
+            >
+              {num}
+            </div>
+            {showComments && (
+              <input
+                type="text"
+                value={comment}
+                onChange={(e) => onCommentChange(num, e.target.value)}
+                maxLength={128}
+                className="w-14 bg-gray-900 text-gray-300 px-1.5 py-0.5 rounded-md border border-gray-600 text-[10px] h-6 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                placeholder="コメント..."
+              />
+            )}
+          </div>
+        );
+      };
+
+      const SubAddressSelector = ({ selectedSubAddress, onSelect, comments, onCommentChange, showComments, onToggleComments }) => {
+        const column1 = Array.from({ length: 10 }, (_, i) => i + 1);
+        const column2 = Array.from({ length: 10 }, (_, i) => i + 11);
+
+        // ▼▼▼ コメント表示/非表示ボタンのアイコンを編集したい場合は、この部分を書き換えます ▼▼▼
+        // 例: {showComments ? '閉じる' : '開く'}
+        const buttonIcon = showComments ? '.' : 'o';
+        // ▲▲▲ ここまで ▲▲▲
+
+        return (
+          <div className="bg-gray-800/80 p-1.5 rounded-lg shadow-md border border-gray-700 self-start">
+            <div className="text-center mb-1">
+              <button onClick={onToggleComments} className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded-md text-xs transition-colors w-full font-mono" title={showComments ? 'コメントを非表示' : 'コメントを表示'}>
+                {buttonIcon}
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <div className="flex flex-col gap-0.5">
+                {column1.map((num) => (
+                  <SubAddressItem
+                    key={num}
+                    num={num}
+                    isSelected={selectedSubAddress === num}
+                    onSelect={onSelect}
+                    comment={comments[num] || ''}
+                    onCommentChange={onCommentChange}
+                    showComments={showComments}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {column2.map((num) => (
+                  <SubAddressItem
+                    key={num}
+                    num={num}
+                    isSelected={selectedSubAddress === num}
+                    onSelect={onSelect}
+                    comment={comments[num] || ''}
+                    onCommentChange={onCommentChange}
+                    showComments={showComments}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      // Appコンポーネント
+      const App = () => {
+        const { useState, useCallback, useEffect } = React;
+
+        const [selectedAddress, setSelectedAddress] = useState(null);
+        const [selectedSubAddress, setSelectedSubAddress] = useState(null);
+        
+        // ▼▼▼ サブアドレスのコメントを事前に設定したい場合は、この行を編集します ▼▼▼
+        // 例: const [comments, setComments] = useState({ 1: '北側', 15: '要観察' });
+        const [comments, setComments] = useState({
+	1: ' ',
+	2: ' ',
+	3: 'E',
+	4: ' ',
+	5: ' ',
+	6: ' ',
+	7: ' ',
+	8: ' ',
+	9: 'キズ',
+	10: ' ',
+	11: '汚れ',
+	12: ' ',
+	13: ' ',
+	14: ' ',
+	15: ' ',
+	16: ' ',
+	17: '曇り',
+	18: ' ',
+	19: ' ',
+	20: ' '
+	});
+        // ▲▲▲ ここまで ▲▲▲
+        
+        const [showComments, setShowComments] = useState(false);
+        const [directoryHandle, setDirectoryHandle] = useState(null);
+        const [stringToReplace, setStringToReplace] = useState('PLACEHOLDER');
+        const [duplicationStrategy, setDuplicationStrategy] = useState('numbered'); // 'error' or 'numbered'
+        const [fixedPhrases, setFixedPhrases] = useState(['OK', 'NG', 'Mirror', 'Beam', 'Frame', '雨', '生育良好', '消毒', '追肥']);
+        const [isEditingPhrases, setIsEditingPhrases] = useState(false);
+        const [selectedPhrases, setSelectedPhrases] = useState([]);
+        const [additionalComment, setAdditionalComment] = useState('');
+        
+        const [isProcessing, setIsProcessing] = useState(false);
+        const [standbyTask, setStandbyTask] = useState(null); // { id, directoryHandle, stringToReplace, newNameCore, duplicationStrategy }
+
+        const [renameLog, setRenameLog] = useState([]);
+        const [isConfiguring, setIsConfiguring] = useState(true);
+
+        const handleCellClick = useCallback((address) => {
+          setSelectedAddress(prev => (prev === address ? null : address));
+        }, []);
+
+        const handleSubAddressSelect = useCallback((subAddress) => {
+          setSelectedSubAddress(prev => (prev === subAddress ? null : subAddress));
+        }, []);
+        
+        const handleCommentChange = useCallback((num, text) => {
+            setComments(prev => ({...prev, [num]: text}));
+        }, []);
+
+        const handlePhraseToggle = useCallback((phrase) => {
+          setSelectedPhrases(prev => 
+            prev.includes(phrase)
+              ? prev.filter(p => p !== phrase)
+              : [...prev, phrase]
+          );
+        }, []);
+
+        const handleFixedPhraseChange = useCallback((index, newValue) => {
+            setFixedPhrases(prev => {
+                const newPhrases = [...prev];
+                newPhrases[index] = newValue;
+                return newPhrases;
+            });
+        }, []);
+
+        const togglePhraseEditMode = useCallback(() => {
+            if (!isEditingPhrases) {
+              setSelectedPhrases([]);
+            }
+            setIsEditingPhrases(prev => !prev);
+        }, [isEditingPhrases]);
+
+        const handleSelectFolder = async () => {
+          if (!('showDirectoryPicker' in window)) {
+             setRenameLog(['エラー: お使いのブラウザはこの機能に対応していません。']);
+             return;
+          }
+          try {
+            const handle = await window.showDirectoryPicker();
+            setDirectoryHandle(handle);
+            setRenameLog([`フォルダ「${handle.name}」が選択されました。`]);
+          } catch (err) {
+            if (err instanceof Error && err.name !== 'AbortError') {
+              console.error("Error selecting folder:", err);
+              const logMessage = err.message.toLowerCase().includes('sub frame') 
+                ? 'エラー: このプレビュー環境ではフォルダ選択が許可されていません。\nこのHTMLファイルをPCに保存し、直接ブラウザで開いてからお試しください。'
+                : `フォルダ選択エラー: ${err.message}.`;
+              setRenameLog(logMessage.split('\n'));
+            } else {
+              setRenameLog(['フォルダ選択がキャンセルされました。']);
+            }
+          }
+        };
+        
+        // --- Rename and Standby Logic ---
+        
+        const fileExists = async (dirHandle, fileName) => {
+            try {
+                await dirHandle.getFileHandle(fileName, { create: false });
+                return true;
+            } catch (e) {
+                if (e.name === 'NotFoundError') {
+                    return false;
+                }
+                throw e;
+            }
+        };
+
+        const getUniqueFileName = async (dirHandle, desiredName, extension) => {
+            let finalName = desiredName + extension;
+            if (!(await fileExists(dirHandle, finalName))) {
+                return finalName;
+            }
+            
+            let count = 1;
+            while(true) {
+                finalName = `${desiredName}(${count})${extension}`;
+                if (!(await fileExists(dirHandle, finalName))) {
+                    return finalName;
+                }
+                count++;
+            }
+        };
+
+        const attemptRename = async (dirHandle, strToReplace, newNameCore, strategy) => {
+          let logs = [];
+          let processedCount = 0;
+          let checkedCount = 0;
+          
+          try {
+            for await (const entry of dirHandle.values()) {
+              checkedCount++;
+              if (entry.kind === 'file' && entry.name.includes(strToReplace)) {
+                const oldName = entry.name;
+                
+                const lastDotIndex = oldName.lastIndexOf('.');
+                const hasExtension = lastDotIndex !== -1 && lastDotIndex > 0 && oldName.length - 1 > lastDotIndex;
+                const extension = hasExtension ? oldName.substring(lastDotIndex) : '';
+                const nameWithoutExt = hasExtension ? oldName.substring(0, lastDotIndex) : oldName;
+                
+                const newNameWithoutExt = nameWithoutExt.replace(new RegExp(strToReplace, 'g'), newNameCore);
+                let newName = newNameWithoutExt + extension;
+
+                try {
+                  if (await fileExists(dirHandle, newName)) {
+                      if (strategy === 'error') {
+                          logs.push(`⚠️ スキップ: 「${newName}」は既に存在します。`);
+                          continue; // Skip this file
+                      } else if (strategy === 'numbered') {
+                          newName = await getUniqueFileName(dirHandle, newNameWithoutExt, extension);
+                          logs.push(`ℹ️ 「${newNameWithoutExt + extension}」は存在するため、連番を追加します。`);
+                      }
+                  }
+
+                  if (typeof entry.move === 'function') {
+                    await entry.move(newName);
+                  } else { // Fallback for browsers that don't support move
+                    const newFileHandle = await dirHandle.getFileHandle(newName, { create: true });
+                    const writable = await newFileHandle.createWritable();
+                    const fileData = await entry.getFile();
+                    await writable.write(fileData);
+                    await writable.close();
+                    await dirHandle.removeEntry(entry.name);
+                  }
+                  logs.push(`✅ ${oldName} -> ${newName}`);
+                  processedCount++;
+                } catch (fileError) {
+                  console.error(`Error processing file ${oldName}:`, fileError);
+                  logs.push(`❌ 「${oldName}」の処理に失敗: ${fileError.message}`);
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Error during renaming process:", err);
+            logs.push(`全体処理エラー: ${err.message}`);
+          }
+          return { logs, processedCount, checkedCount };
+        };
+        
+        const handleExecute = async () => {
+          const isDeleting = !selectedAddress && !selectedSubAddress && selectedPhrases.length === 0 && additionalComment === '';
+
+          if (!directoryHandle || !stringToReplace) {
+            setRenameLog(["エラー: フォルダと置換対象の文字列を設定してください。"]);
+            return;
+          }
+          setIsProcessing(true);
+          const actionText = isDeleting ? '文字列削除' : '置換';
+          setRenameLog([`${actionText}処理開始: フォルダ「${directoryHandle.name}」`]);
+          
+          const newNameCore = isDeleting 
+            ? ''
+            : [selectedAddress, selectedSubAddress, ...selectedPhrases, additionalComment].filter(Boolean).join('_');
+          
+          const result = await attemptRename(directoryHandle, stringToReplace, newNameCore, duplicationStrategy);
+          
+          if (result.processedCount > 0) {
+            setRenameLog(prev => [...prev, ...result.logs, `---`, `完了: ${result.checkedCount}件中${result.processedCount}件の${actionText}を完了`]);
+          } else {
+            setRenameLog(prev => [...prev, ...result.logs, `---`, `対象ファイルが見つかりません。ファイルが見つかるまで待機します...`]);
+            setStandbyTask({
+                id: Date.now(),
+                directoryHandle,
+                stringToReplace,
+                newNameCore,
+                duplicationStrategy
+            });
+          }
+          setIsProcessing(false);
+        };
+
+        const handleCancelStandby = () => {
+            setStandbyTask(null);
+            setRenameLog(prev => [...prev, "---", "待機をキャンセルしました。"]);
+        }
+
+        useEffect(() => {
+            if (!standbyTask) return;
+
+            const intervalId = setInterval(async () => {
+                const result = await attemptRename(
+                  standbyTask.directoryHandle, 
+                  standbyTask.stringToReplace, 
+                  standbyTask.newNameCore, 
+                  standbyTask.duplicationStrategy
+                );
+                if (result.processedCount > 0) {
+                    const actionText = standbyTask.newNameCore ? 'リネーム' : '文字列削除';
+                    setRenameLog(prev => [...prev, `---`, `[自動実行]`, ...result.logs, `---`, `自動${actionText}が完了しました。待機を停止します。`]);
+                    setStandbyTask(null); // Stop standby
+                }
+            }, 3000); // Check every 3 seconds
+
+            return () => clearInterval(intervalId); // Cleanup on component unmount or task change
+        }, [standbyTask]);
+        
+        // ▼▼▼ メインマップの形を編集したい場合は、この配列を書き換えます ▼▼▼
+        // 各行がマップの横1列に対応します。
+        const gridRows = [
+          ['02', '01'],
+          ['08', '07', '06', '05', '04', '03'],
+          ['16', '15', '14', '13', '12', '11', '10', '09'],
+          ['24', '23', '22', '21', '20', '19', '18', '17'],
+          ['34', '33', '32', '31', '30', '29', '28', '27', '26', '25'],
+          ['44', '43', '42', '41', '40', '39', '38', '37', '36', '35'],
+          ['52', '51', '50', '49', '48', '47', '46', '45'],
+          ['60', '59', '58', '57', '56', '55', '54', '53'],
+          ['65', '64', '63', '62', '61'],
+          ['70', '69', '68', '67']
+        ];
+        // ▲▲▲ ここまで ▲▲▲
+
+        const isApiSupported = 'showDirectoryPicker' in window;
+        const isDeleting = !selectedAddress && !selectedSubAddress && selectedPhrases.length === 0 && additionalComment === '';
+        
+        const newNamePreview = isDeleting
+          ? ''
+          : [selectedAddress, selectedSubAddress, ...selectedPhrases, additionalComment].filter(Boolean).join('_');
+        
+        const executeButtonText = isDeleting
+          ? `実行:「${stringToReplace}」→「」`
+          : `実行:「${stringToReplace}」→「${newNamePreview}」`;
+        const executeButtonTitle = isDeleting
+          ? `実行:「${stringToReplace}」をファイル名から削除します`
+          : executeButtonText;
+        const canExecute = directoryHandle && stringToReplace;
+
+        return (
+          <main className="bg-gray-900 min-h-screen text-white flex flex-col items-center p-2 md:p-4">
+            <div className="w-full max-w-4xl mx-auto flex flex-col items-center">
+              
+              <div className="w-full flex flex-row items-start justify-center gap-4 mb-4">
+                <div className="flex flex-col items-center gap-0.5 p-1 bg-gray-900/50 rounded-lg">
+                  {gridRows.map((row, rowIndex) => (
+                    <div key={rowIndex} className="flex flex-row justify-center gap-0.5">
+                      {row.map((address) => (
+                        <GridCell
+                          key={address}
+                          address={address}
+                          isSelected={selectedAddress === address}
+                          onClick={handleCellClick}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <SubAddressSelector 
+                  selectedSubAddress={selectedSubAddress}
+                  onSelect={handleSubAddressSelect}
+                  comments={comments}
+                  onCommentChange={handleCommentChange}
+                  showComments={showComments}
+                  onToggleComments={() => setShowComments(prev => !prev)}
+                />
+              </div>
+
+              <section className="w-full max-w-2xl bg-gray-800 rounded-lg border border-gray-700 p-3 space-y-3">
+                
+                {!isApiSupported && (
+                   <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-3 py-1 rounded-lg text-center text-xs">
+                    お使いのブラウザはファイル操作に未対応です。
+                  </div>
+                )}
+
+                {isApiSupported && (
+                  isConfiguring ? (
+                    <div className="space-y-4">
+                      <h2 className="text-center text-emerald-400 font-bold">初期設定</h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-center">
+                          <div className="flex items-center gap-2">
+                              <button onClick={handleSelectFolder} className="px-2 py-1 bg-sky-600 hover:bg-sky-500 rounded-md font-bold transition-colors text-xs flex-shrink-0">フォルダを選択</button>
+                              <p className="px-2 py-1 bg-gray-900 rounded-md text-gray-400 w-full truncate text-[11px]">
+                                  {directoryHandle ? `選択中: ${directoryHandle.name}` : "未選択"}
+                              </p>
+                          </div>
+                          <input
+                              id="replace-string"
+                              type="text"
+                              value={stringToReplace}
+                              onChange={(e) => setStringToReplace(e.target.value)}
+                              className="w-full bg-gray-900 text-white px-2 py-1 rounded-md border border-gray-600 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs"
+                              placeholder="置換対象の文字列 (例: PHOTO_ID)"
+                          />
+                      </div>
+                      <div className="pt-2">
+                        <label className="block text-center text-sm font-bold text-gray-300 mb-2">ファイル名が重複する場合</label>
+                        <div className="flex justify-center gap-4 bg-gray-900/50 p-2 rounded-lg">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input type="radio" name="duplication" value="error" checked={duplicationStrategy === 'error'} onChange={() => setDuplicationStrategy('error')} className="form-radio bg-gray-900 text-emerald-500 focus:ring-emerald-500"/>
+                                <span>エラーにして処理しない</span>
+                            </label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input type="radio" name="duplication" value="numbered" checked={duplicationStrategy === 'numbered'} onChange={() => setDuplicationStrategy('numbered')} className="form-radio bg-gray-900 text-emerald-500 focus:ring-emerald-500"/>
+                                <span>連番を追加 (例: file(1).jpg)</span>
+                            </label>
+                        </div>
+                      </div>
+                      <div className="text-center pt-2">
+                        <button
+                          onClick={() => setIsConfiguring(false)}
+                          disabled={!directoryHandle || !stringToReplace}
+                          className="px-4 py-1 bg-sky-600 hover:bg-sky-500 rounded-md font-bold text-sm transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
+                        >
+                          設定完了
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                       <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded-md text-xs">
+                          <p className="truncate text-gray-300">
+                              <span className="font-bold text-gray-400">フォルダ:</span> {directoryHandle?.name ?? '未選択'} <span className="text-gray-600 mx-1">|</span>
+                              <span className="font-bold text-gray-400">置換対象:</span>「{stringToReplace}」
+                          </p>
+                          <button onClick={() => setIsConfiguring(true)} className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded-md text-xs transition-colors flex-shrink-0 ml-2">
+                              設定変更
+                          </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex gap-1.5 flex-wrap items-center">
+                          {isEditingPhrases ? (
+                            fixedPhrases.map((phrase, index) => (
+                              <input
+                                key={index}
+                                type="text"
+                                value={phrase}
+                                onChange={(e) => handleFixedPhraseChange(index, e.target.value)}
+                                className="w-20 bg-gray-900 text-white px-2 py-0.5 rounded-md border border-emerald-500 text-xs"
+                              />
+                            ))
+                          ) : (
+                            fixedPhrases.map((phrase, index) => {
+                              if (!phrase) return null;
+                              const isSelected = selectedPhrases.includes(phrase);
+                              return (
+                                <button
+                                  key={index}
+                                  onClick={() => handlePhraseToggle(phrase)}
+                                  className={`px-2 py-0.5 rounded-md text-xs transition-all duration-200 ${
+                                    isSelected
+                                      ? 'bg-emerald-600 text-white font-bold ring-1 ring-emerald-400'
+                                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                                  }`}
+                                >
+                                  {phrase}
+                                </button>
+                              )
+                            })
+                          )}
+                          <button onClick={togglePhraseEditMode} className="px-2 py-0.5 bg-gray-600 hover:bg-gray-500 rounded-md text-xs transition-colors flex-shrink-0 ml-auto">
+                            {isEditingPhrases ? '完了' : '編集'}
+                          </button>
+                        </div>
+
+                        <div className="relative w-full">
+                            <input
+                              id="additional-comment"
+                              type="text"
+                              value={additionalComment}
+                              onChange={(e) => setAdditionalComment(e.target.value)}
+                              className="w-full bg-gray-900 text-white px-2 py-1 rounded-md border border-gray-600 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 text-xs"
+                              placeholder="追加コメント (任意)"
+                            />
+                            {additionalComment && (
+                                <button onClick={() => setAdditionalComment('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white font-bold text-sm">
+                                    ×
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="space-y-2 pt-2">
+                           {standbyTask ? (
+                                <button
+                                    onClick={handleCancelStandby}
+                                    className="w-full px-3 py-1.5 bg-orange-600 hover:bg-orange-500 rounded-md font-bold text-sm transition-all flex items-center justify-center gap-2"
+                                >
+                                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    待機中... (キャンセル)
+                                </button>
+                            ) : (
+                                <button
+                                  onClick={handleExecute}
+                                  disabled={!canExecute || isProcessing}
+                                  className="w-full px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-md font-bold text-sm transition-all break-all"
+                                  title={executeButtonTitle}
+                                >
+                                  {isProcessing ? '処理中...' : executeButtonText}
+                                </button>
+                            )}
+                        </div>
+                        
+                        <textarea
+                          readOnly
+                          value={renameLog.join('\n')}
+                          className="w-full h-20 bg-gray-900/80 text-gray-300 font-mono text-[10px] p-1 rounded-md border border-gray-600"
+                          placeholder="ここに処理結果が表示されます..."
+                        />
+                      </div>
+                    </div>
+                  )
+                )}
+              </section>
+
+            </div>
+          </main>
+        );
+      };
+
+      // Reactアプリを#rootにマウント
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
